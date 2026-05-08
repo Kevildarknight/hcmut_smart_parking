@@ -1,0 +1,6 @@
+{
+  "name": "HCMUT Smart Parking (IoT-SPMS)",
+  "description": "Integrated management system for university parking featuring automated access control, real-time IoT monitoring, HCMUT SSO authentication, and multi-role dashboards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

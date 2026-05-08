@@ -234,7 +234,7 @@ function GateKioskSimulator() {
                 <CheckCircle2 className="w-10 h-10 text-green-500" />
               </div>
               <div className="space-y-1">
-                <h2 className="text-3xl font-black italic tracking-tighter uppercase">Welcome!</h2>
+                <h2 className="text-3xl font-black tracking-tighter uppercase italic text-blue-600">Welcome!</h2>
                 <p className="text-sm text-slate-400 uppercase tracking-widest font-bold font-mono">{session?.role}</p>
               </div>
             </motion.div>
@@ -604,7 +604,7 @@ function LoginScreen({ onLogin, targetRole }: { onLogin: (user: AuthUser) => voi
     setTimeout(() => {
       onLogin({
         id: '2352235',
-        name: targetRole === UserRole.ADMIN ? 'Admin User' : targetRole === UserRole.OPERATOR ? 'Nguyen Minh Quan' : 'Nguyen Tan Dat',
+        name: targetRole === UserRole.ADMIN ? 'Admin User' : targetRole === UserRole.OPERATOR ? 'Dang Quang Dung' : 'Nguyen Tan Dat',
         role: targetRole,
         email: 'dat.nguyen@hcmut.edu.vn'
       });
@@ -772,7 +772,7 @@ function OperatorDashboard({ onLogout }: { onLogout: () => void }) {
         </div>
         <div className="flex items-center gap-6">
           <div className="text-right hidden sm:block">
-            <p className="text-xs font-black text-slate-900 uppercase tracking-tight">Nguyen Minh Quan</p>
+            <p className="text-xs font-black text-slate-900 uppercase tracking-tight">Dang Quang Dung</p>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Operator (Security)</p>
           </div>
           <div className="w-10 h-10 bg-slate-100 rounded-2xl border border-slate-200 flex items-center justify-center">

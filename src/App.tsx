@@ -183,16 +183,124 @@ function GateKioskSimulator() {
 }
 
 function MemberPortal() {
-  const [sessions] = useState<ParkingSession[]>([
-    { id: '1', plateNumber: '43B-999.88', entryTime: new Date(Date.now() - 3600000), role: UserRole.STUDENT, status: SessionStatus.ACTIVE, fee: 2000 },
-    { id: '2', plateNumber: '43B-999.88', entryTime: new Date(Date.now() - 86400000), exitTime: new Date(Date.now() - 82800000), role: UserRole.STUDENT, status: SessionStatus.PAID, fee: 4000 },
+  const getFee = (date: Date) => (date.getHours() >= 18 ? 3000 : 2000);
+
+  const [sessions, setSessions] = useState<ParkingSession[]>([
+    { 
+      id: '1', 
+      plateNumber: '43B-999.88', 
+      entryTime: new Date(Date.now() - 3600000), 
+      role: UserRole.STUDENT, 
+      status: SessionStatus.ACTIVE, 
+      fee: 0 
+    },
+    { 
+      id: '2', 
+      plateNumber: '43B-999.88', 
+      entryTime: new Date(Date.now() - 86400000), 
+      exitTime: new Date(Date.now() - 82800000), 
+      role: UserRole.STUDENT, 
+      status: SessionStatus.PAID, 
+      fee: 4000 
+    },
   ]);
 
+  const [balanceDue, setBalanceDue] = useState(12000);
+  const [paymentState, setPaymentState] = useState<'IDLE' | 'PROCESSING' | 'PAID' | 'ERROR' | 'PENDING'>('IDLE');
+  const [errorMessage, setErrorMessage] = useState("");
+  const [retryCountdown, setRetryCountdown] = useState(0);
+  
+  // State cho tính năng Nạp tiền và Animation
+  const [topUpAmount, setTopUpAmount] = useState<string>('');
+  const [recentTopUp, setRecentTopUp] = useState<number | null>(null);
+
+  const activeSession = sessions.find(s => s.status === SessionStatus.ACTIVE);
+  const currentFee = activeSession ? getFee(new Date()) : 0;
+
+  const handlePayment = () => {
+    if (paymentState !== 'IDLE' || !activeSession) return;
+    
+    if (balanceDue < currentFee) {
+      setErrorMessage("Insufficient Balance");
+      setPaymentState('ERROR');
+      setTimeout(() => {
+        setPaymentState('IDLE');
+        setErrorMessage("");
+      }, 3000);
+      return;
+    }
+
+    setPaymentState('PROCESSING');
+
+    setTimeout(() => {
+      const isSuccess = Math.random() > 0.2;
+
+      if (isSuccess) {
+        const newBalance = balanceDue - currentFee;
+        setBalanceDue(newBalance);
+        setPaymentState('PAID');
+        
+        setSessions(prev => prev.map(s => 
+          s.id === activeSession.id ? { ...s, status: SessionStatus.PAID, exitTime: new Date(), fee: currentFee } : s
+        ));
+        
+        setTimeout(() => {
+           setPaymentState('IDLE');
+           setSessions(prev => [
+             { id: Date.now().toString(), plateNumber: '43B-999.88', entryTime: new Date(), role: UserRole.STUDENT, status: SessionStatus.ACTIVE, fee: 0 },
+             ...prev
+           ]);
+        }, 2000);
+
+      } else {
+        setErrorMessage("Gateway Timeout");
+        setPaymentState('ERROR');
+        setTimeout(() => {
+          setPaymentState('PENDING');
+          startRetryTimer(5);
+        }, 2000);
+      }
+    }, 1500); 
+  };
+
+  const startRetryTimer = (seconds: number) => {
+    setRetryCountdown(seconds);
+    const interval = setInterval(() => {
+      setRetryCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          setPaymentState('IDLE');
+          setErrorMessage("");
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // Hàm xử lý Nạp tiền đã thêm hiệu ứng
+  const handleTopUp = (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseInt(topUpAmount, 10);
+    if (!isNaN(amount) && amount > 0) {
+      setBalanceDue(prev => prev + amount);
+      setTopUpAmount(''); // Reset input sau khi nạp xong
+      
+      // Kích hoạt animation hiện số tiền
+      setRecentTopUp(amount);
+      
+      // Ẩn hiệu ứng đi sau 1.5 giây
+      setTimeout(() => {
+        setRecentTopUp(null);
+      }, 1500);
+    }
+  };
+
   return (
-    <div id="member-portal" className="p-6 md:p-8 space-y-8 max-w-5xl mx-auto h-full flex flex-col overflow-auto">
+    <div id="member-portal" className="p-6 md:p-8 space-y-8 max-w-5xl mx-auto h-full flex flex-col overflow-auto relative">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 py-4 shrink-0">
         <div>
-          <h1 className="text-2xl font-black tracking-tight text-slate-900 uppercase italic">Hi, Nguyen Tan Dat</h1>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 uppercase italic">Hi, Đặng Quang Dũng</h1>
           <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Student ID: 2352235 • Building C6</p>
         </div>
         <div className="flex gap-2">
@@ -205,15 +313,17 @@ function MemberPortal() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         <div className="md:col-span-2 space-y-8">
-          <Card id="active-session" className="p-8 border-l-4 border-l-brand relative overflow-hidden group">
+          <Card id="active-session" className={`p-8 border-l-4 relative overflow-hidden group transition-colors ${paymentState === 'PAID' ? 'border-l-green-500' : 'border-l-brand'}`}>
             <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:scale-110 transition-transform">
-               <Car className="w-32 h-32 text-brand" />
+               <Car className={`w-32 h-32 ${paymentState === 'PAID' ? 'text-green-500' : 'text-brand'}`} />
             </div>
             <div className="flex items-center justify-between mb-8">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                <Car className="w-3 h-3" /> Current Session
+                <Car className="w-3 h-3" /> {activeSession ? 'Current Session' : 'Latest Session'}
               </h3>
-              <Badge color="green">Active</Badge>
+              <Badge color={paymentState === 'PAID' ? 'slate' : 'green'}>
+                {paymentState === 'PAID' ? 'CONCLUDED' : 'ACTIVE'}
+              </Badge>
             </div>
             <div className="space-y-6">
               <div className="flex flex-col">
@@ -227,7 +337,13 @@ function MemberPortal() {
                 </div>
                 <div className="pl-6">
                   <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Accrued Fee</p>
-                  <p className="text-xl font-bold tracking-tight text-brand">2,000 VND</p>
+                  <p className={`text-xl font-bold tracking-tight ${paymentState === 'PAID' ? 'text-green-600' : 'text-brand'}`}>
+                    {paymentState === 'PAID' && activeSession 
+                      ? currentFee.toLocaleString() 
+                      : activeSession 
+                        ? currentFee.toLocaleString() 
+                        : '0'} VND
+                  </p>
                 </div>
               </div>
             </div>
@@ -241,58 +357,136 @@ function MemberPortal() {
                   <tr>
                     <th className="px-6 py-4">Date</th>
                     <th className="px-6 py-4">In/Out Session</th>
-                    <th className="px-6 py-4 text-right">Fee</th>
+                    <th className="px-6 py-4 text-right">Status / Fee</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50 italic">
-                  {sessions.slice(1).map(s => (
+                  {sessions.filter(s => s.status === SessionStatus.PAID).map(s => (
                     <tr key={s.id} className="hover:bg-slate-50 transition-colors group">
-                      <td className="px-6 py-6 text-sm font-bold text-slate-900">May 3, 2026</td>
+                      <td className="px-6 py-6 text-sm font-bold text-slate-900">
+                        {s.entryTime.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </td>
                       <td className="px-6 py-6 font-normal">
                          <div className="flex items-center gap-3">
                             <span className="text-xs font-mono font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded">{s.entryTime.toLocaleTimeString()}</span>
                             <ChevronRight className="w-3 h-3 text-slate-300" />
-                            <span className="text-xs font-mono font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded">{s.exitTime?.toLocaleTimeString()}</span>
+                            <span className="text-xs font-mono font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded">{s.exitTime ? s.exitTime.toLocaleTimeString() : '---'}</span>
                          </div>
                       </td>
-                      <td className="px-6 py-6 text-sm text-right font-black text-slate-900 italic tracking-tighter">+{s.fee.toLocaleString()} VND</td>
+                      <td className="px-6 py-6 text-sm text-right font-black text-slate-900 italic tracking-tighter">
+                         <span className="text-green-600 flex items-center justify-end gap-1"><CheckCircle2 className="w-3 h-3"/> {s.fee.toLocaleString()} VND</span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <button className="w-full py-4 text-[10px] font-bold text-brand hover:bg-brand-light transition-colors uppercase tracking-[0.2em] border-t border-slate-50">View Full Transaction History</button>
             </Card>
           </div>
         </div>
 
         <div className="space-y-8">
-          <Card className="p-8 bg-brand text-white shadow-2xl shadow-blue-900/40 border-none">
+          <Card className={`p-8 border shadow-sm relative overflow-hidden transition-all duration-500 ${
+             paymentState === 'PAID' ? 'bg-green-50 border-green-200' :
+             paymentState === 'ERROR' ? 'bg-red-50 border-red-200' :
+             paymentState === 'PENDING' ? 'bg-yellow-50 border-yellow-200' :
+             'bg-white border-slate-200'
+          }`}>
             <div className="flex items-center justify-between mb-8">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2 opacity-80">
+              <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2 ${paymentState === 'IDLE' ? 'text-slate-400' : 'opacity-70'}`}>
                 <History className="w-3 h-3" /> Monthly Invoice
               </h3>
-              <Badge color="slate">MAY 2026</Badge>
+              {paymentState === 'PAID' ? <Badge color="green">RECEIPT</Badge> : <Badge color="slate">MAY 2026</Badge>}
             </div>
-            <div className="space-y-1 py-4 text-center md:text-left">
-               <p className="text-[10px] uppercase tracking-[0.2em] font-black opacity-60">Balance Due</p>
-               <p className="text-5xl font-black italic tracking-tighter">12,000<span className="text-sm ml-1 font-bold not-italic">VND</span></p>
+            
+            <div className="space-y-1 py-4 text-center md:text-left relative">
+               <p className="text-[10px] uppercase tracking-[0.2em] font-black text-slate-500">Available Funds</p>
+               
+               {/* Khối chứa UI số tiền và animation */}
+               <div className="relative inline-block">
+                 <p className={`text-5xl font-black tracking-tighter ${paymentState === 'PAID' ? 'text-green-600' : 'text-brand'}`}>
+                   {balanceDue.toLocaleString()}<span className="text-sm ml-1 font-bold opacity-60">VND</span>
+                 </p>
+                 
+                 {/* Animation bay lên */}
+                 <AnimatePresence>
+                   {recentTopUp !== null && (
+                     <motion.div
+                       initial={{ opacity: 0, y: 10, scale: 0.8 }}
+                       animate={{ opacity: 1, y: -40, scale: 1.1 }}
+                       exit={{ opacity: 0 }}
+                       transition={{ duration: 1.2, ease: "easeOut" }}
+                       className="absolute top-0 right-0 text-green-500 font-black text-xl tracking-tighter drop-shadow-sm whitespace-nowrap"
+                     >
+                       + {recentTopUp.toLocaleString()}
+                     </motion.div>
+                   )}
+                 </AnimatePresence>
+               </div>
             </div>
-            <button className="w-full mt-8 py-4 bg-white text-brand font-black rounded-xl hover:shadow-xl hover:scale-105 transition-all text-sm uppercase tracking-widest flex items-center justify-center gap-2">
-               Pay with BKPay <ArrowRightLeft className="w-4 h-4" />
+
+            {paymentState === 'ERROR' && (
+              <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="text-xs text-red-600 font-bold mb-4 flex items-center gap-2 bg-red-100 p-2 rounded-lg">
+                <AlertTriangle className="w-4 h-4" /> {errorMessage}
+              </motion.div>
+            )}
+            
+            <button 
+              onClick={handlePayment}
+              disabled={paymentState !== 'IDLE' || !activeSession}
+              className={`w-full mt-4 py-4 font-black rounded-xl transition-all text-sm uppercase tracking-widest flex items-center justify-center gap-2 shadow-sm ${
+                paymentState === 'PAID' ? 'bg-green-600 text-white shadow-green-600/30' :
+                paymentState === 'PROCESSING' ? 'bg-brand/80 text-white cursor-wait' :
+                paymentState === 'ERROR' ? 'bg-red-600 text-white' :
+                paymentState === 'PENDING' ? 'bg-yellow-500 text-white' :
+                'bg-brand text-white hover:shadow-lg hover:shadow-brand/30 hover:scale-[1.02] active:scale-95'
+              }`}
+            >
+              {paymentState === 'PROCESSING' ? (
+                <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Processing...</>
+              ) : paymentState === 'PAID' ? (
+                <>Success <CheckCircle2 className="w-4 h-4" /></>
+              ) : paymentState === 'ERROR' ? (
+                <>Failed</>
+              ) : paymentState === 'PENDING' ? (
+                <>Retry in {retryCountdown}s...</>
+              ) : (
+                <>Pay {currentFee.toLocaleString()} VND <ArrowRightLeft className="w-4 h-4" /></>
+              )}
             </button>
           </Card>
 
-          <Card className="p-6 bg-slate-50 border-dashed border-2 border-slate-200">
+          {/* Form Nạp tiền thay thế cho QR Code */}
+          <Card className="p-6 bg-white border border-slate-200 shadow-sm">
              <div className="flex items-center gap-4 mb-4 font-normal">
-                <div className="p-3 bg-white rounded-xl shadow-sm"><QrCode className="w-6 h-6 text-slate-400" /></div>
+                <div className="p-3 bg-slate-50 rounded-xl shadow-sm border border-slate-100">
+                  <CreditCard className="w-6 h-6 text-brand" />
+                </div>
                 <div>
-                   <p className="text-xs font-bold uppercase tracking-widest text-slate-800">Quick Entry QR</p>
-                   <p className="text-[10px] text-slate-500 font-medium">Use if card reader is slow</p>
+                   <p className="text-xs font-bold uppercase tracking-widest text-slate-800">Top Up Wallet</p>
+                   <p className="text-[10px] text-slate-500 font-medium">Add funds for parking</p>
                 </div>
              </div>
-             <div className="aspect-square bg-white rounded-xl flex items-center justify-center border border-slate-100 italic font-mono text-[10px] text-slate-300">
-                QR CODE PREVIEW
-             </div>
+             <form onSubmit={handleTopUp} className="space-y-3 mt-4">
+                <div className="relative">
+                   <input
+                      type="number"
+                      min="1000"
+                      step="1000"
+                      placeholder="Enter amount..."
+                      value={topUpAmount}
+                      onChange={(e) => setTopUpAmount(e.target.value)}
+                      className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand transition-all font-bold text-slate-700 placeholder:text-slate-400 placeholder:font-normal"
+                   />
+                   <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">VND</span>
+                </div>
+                <button
+                   type="submit"
+                   disabled={!topUpAmount || Number(topUpAmount) <= 0}
+                   className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                   Confirm Top Up
+                </button>
+             </form>
           </Card>
         </div>
       </div>
@@ -770,14 +964,15 @@ export default function App() {
 
   return (
     <div id="root-container" className="flex h-screen w-full bg-slate-50 text-slate-800 overflow-hidden font-sans">
-      {/* Sidebar Navigation */}
-      <nav id="sidebar" className={`bg-sidebar-bg text-white flex flex-col transition-all duration-300 border-r border-slate-700 shrink-0 ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
+      {/* Sidebar Navigation - Đã sửa thành Light Theme */}
+      <nav id="sidebar" className={`bg-white text-slate-800 flex flex-col transition-all duration-300 border-r border-slate-200 shrink-0 ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
         <div className="p-8 flex items-center gap-3 shrink-0">
-          <div className="w-10 h-10 bg-brand rounded flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-blue-900/50">P</div>
+          <div className="w-10 h-10 bg-brand rounded flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-blue-900/30">P</div>
           {isSidebarOpen && (
             <div>
-              <h1 className="text-white font-bold leading-none tracking-tight uppercase">HCMUT</h1>
-              <span className="text-slate-400 text-[10px] uppercase tracking-[0.2em] font-black mt-1 block">Smart Parking</span>
+              {/* Đã sửa màu chữ thành text-slate-900 để dễ nhìn */}
+              <h1 className="text-slate-900 font-bold leading-none tracking-tight uppercase">HCMUT</h1>
+              <span className="text-slate-500 text-[10px] uppercase tracking-[0.2em] font-black mt-1 block">Smart Parking</span>
             </div>
           )}
         </div>
@@ -789,8 +984,8 @@ export default function App() {
               onClick={() => handleTabChange(tab.id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all group ${
                 activeTab === tab.id 
-                ? 'bg-brand/10 text-brand shadow-inner' 
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                ? 'bg-brand/10 text-brand shadow-sm' 
+                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
               }`}
             >
               <tab.icon className={`w-5 h-5 shrink-0 transition-all ${activeTab === tab.id ? 'text-brand scale-110' : 'group-hover:translate-x-1'}`} />
@@ -799,30 +994,30 @@ export default function App() {
           ))}
         </div>
 
-        <div className="p-6 mt-auto border-t border-white/5 space-y-4">
+        <div className="p-6 mt-auto border-t border-slate-100 space-y-4">
           {user && isSidebarOpen && (
-             <div className="px-4 py-3 bg-white/5 rounded-xl border border-white/5 flex items-center gap-3">
-                <div className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center font-black text-xs text-brand">{user.name.charAt(0)}</div>
+             <div className="px-4 py-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center gap-3">
+                <div className="w-8 h-8 bg-slate-200 rounded-lg flex items-center justify-center font-black text-xs text-brand">{user.name.charAt(0)}</div>
                 <div className="flex-1 min-w-0">
-                   <p className="text-[10px] font-black uppercase truncate">{user.name}</p>
+                   <p className="text-[10px] font-black uppercase text-slate-800 truncate">{user.name}</p>
                    <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest truncate">{user.role}</p>
                 </div>
              </div>
           )}
           {isSidebarOpen && (
-            <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700">
+            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
               <p className="text-[10px] text-slate-500 uppercase tracking-tighter mb-1 font-black">System Status</p>
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse ring-4 ring-green-500/10"></span>
-                <span className="text-xs text-slate-200 font-mono font-bold tracking-tighter">Nodes Online: 42</span>
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse ring-4 ring-green-500/20"></span>
+                <span className="text-xs text-slate-700 font-mono font-bold tracking-tighter">Nodes Online: 42</span>
               </div>
             </div>
           )}
           <button 
             onClick={user ? handleLogout : () => setIsSidebarOpen(!isSidebarOpen)}
-            className="w-full p-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 flex items-center justify-center transition-colors shadow-inner"
+            className="w-full p-3 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-500 flex items-center justify-center transition-colors shadow-sm border border-slate-100"
           >
-            {user ? <LogOut className="w-5 h-5 opacity-50" /> : isSidebarOpen ? <LogOut className="w-5 h-5 opacity-50" /> : <LogIn className="w-5 h-5 text-brand" />}
+            {user ? <LogOut className="w-5 h-5 opacity-70" /> : isSidebarOpen ? <LogOut className="w-5 h-5 opacity-70" /> : <LogIn className="w-5 h-5 text-brand" />}
           </button>
         </div>
       </nav>

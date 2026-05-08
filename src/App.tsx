@@ -102,7 +102,7 @@ function GateKioskSimulator() {
               className="text-center space-y-8"
             >
               <div className="space-y-1">
-                <h2 className="text-3xl font-black tracking-tighter uppercase italic">HCMUT Parking</h2>
+                <h2 className="text-3xl font-black tracking-tighter uppercase italic text-blue-600">HCMUT Parking</h2>
                 <p className="text-slate-400 text-xs uppercase tracking-widest font-medium">Please select entry method</p>
               </div>
               <div className="flex gap-4">
@@ -300,7 +300,7 @@ function MemberPortal() {
     <div id="member-portal" className="p-6 md:p-8 space-y-8 max-w-5xl mx-auto h-full flex flex-col overflow-auto relative">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 py-4 shrink-0">
         <div>
-          <h1 className="text-2xl font-black tracking-tight text-slate-900 uppercase italic">Hi, Đặng Quang Dũng</h1>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 uppercase italic">Hi, Nguyen Tan Dat</h1>
           <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Student ID: 2352235 • Building C6</p>
         </div>
         <div className="flex gap-2">

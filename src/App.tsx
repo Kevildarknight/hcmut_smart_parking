@@ -32,7 +32,12 @@ import {
   Car,
   Lock,
   Eye,
-  EyeOff
+  EyeOff,
+  Download,
+  RefreshCw,
+  Database,
+  Users,
+  FileText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { io, Socket } from 'socket.io-client';
@@ -68,59 +73,118 @@ const Card = ({ children, className = '', id }: { children: React.ReactNode, cla
 // --- Sub-Apps ---
 
 function GateKioskSimulator() {
-  const [step, setStep] = useState<'IDLE' | 'VERIFYING' | 'WELCOME' | 'VISITOR_PLATE' | 'BARRIER_OPEN'>('IDLE');
-  const [mode, setMode] = useState<'MEMBER' | 'VISITOR'>('MEMBER');
+  type KioskStep = 'IDLE' | 'VERIFYING' | 'CHECKING_AVAILABILITY' | 'DISPENSING_TICKET' | 'WELCOME' | 'DENIED' | 'BARRIER_OPEN' | 'FINALIZING';
+  const [step, setStep] = useState<KioskStep>('IDLE');
+  const [message, setMessage] = useState('');
   const [session, setSession] = useState<Partial<ParkingSession> | null>(null);
 
-  const simulateTap = (role: UserRole) => {
+  // Cấu hình giả lập (Debug)
+  const [simConfig, setSimConfig] = useState<{ isFull: boolean, isInvalid: boolean, isHwError: boolean }>({
+    isFull: false,
+    isInvalid: false,
+    isHwError: false
+  });
+
+  // --- Luồng Member (Dựa trên sequence_diagram_hcmutmember_entry) ---
+  const simulateMemberTap = () => {
     setStep('VERIFYING');
+    
     setTimeout(() => {
-      setSession({
-        role,
-        entryTime: new Date(),
-        plateNumber: role === UserRole.VISITOR ? '51A-123.45' : '43B-999.88'
-      });
-      setStep('WELCOME');
-      setTimeout(() => setStep('BARRIER_OPEN'), 2000);
-      setTimeout(() => setStep('IDLE'), 6000);
+      // 1. Kiểm tra thẻ hợp lệ
+      if (simConfig.isInvalid) {
+        setMessage('INVALID ID CARD. ACCESS DENIED.');
+        setStep('DENIED');
+        setTimeout(() => setStep('IDLE'), 3000);
+        return;
+      }
+
+      // 2. Kiểm tra sức chứa
+      setStep('CHECKING_AVAILABILITY');
+      setTimeout(() => {
+        if (simConfig.isFull) {
+          setMessage('PARKING FULL. PLEASE USE ZONE B.');
+          setStep('DENIED');
+          setTimeout(() => setStep('IDLE'), 3000);
+          return;
+        }
+
+        // 3. Cho phép vào
+        setSession({ role: UserRole.STUDENT, entryTime: new Date() });
+        setStep('WELCOME');
+        
+        setTimeout(() => {
+          setStep('BARRIER_OPEN');
+          // 4. Cảm biến phát hiện xe qua -> Đóng barrier (Finalizing)
+          setTimeout(() => {
+             setStep('FINALIZING');
+             setTimeout(() => setStep('IDLE'), 2000);
+          }, 3000);
+        }, 1500);
+      }, 1000);
+
+    }, 1500);
+  };
+
+  // --- Luồng Visitor (Dựa trên sequence_diagram_entry_visitors) ---
+  const simulateVisitorRequest = () => {
+    setStep('CHECKING_AVAILABILITY');
+    
+    setTimeout(() => {
+      // 1. Kiểm tra sức chứa
+      if (simConfig.isFull) {
+        setMessage('PARKING FULL. NO TICKETS AVAILABLE.');
+        setStep('DENIED');
+        setTimeout(() => setStep('IDLE'), 3000);
+        return;
+      }
+
+      // 2. Phát hành vé
+      setStep('DISPENSING_TICKET');
+      setTimeout(() => {
+        if (simConfig.isHwError) {
+          setMessage('HARDWARE ERROR: DISPENSER JAMMED. OPERATOR ALERTED.');
+          setStep('DENIED');
+          setTimeout(() => setStep('IDLE'), 4000);
+          return;
+        }
+        // Chờ Visitor rút vé (trigger bằng tay via UI)
+      }, 1500);
+    }, 1500);
+  };
+
+  // Visitor rút vé -> Mở barrier
+  const handleTakeTicket = () => {
+    setSession({ role: UserRole.VISITOR, entryTime: new Date() });
+    setStep('WELCOME');
+    setTimeout(() => {
+      setStep('BARRIER_OPEN');
+      setTimeout(() => {
+         setStep('FINALIZING'); // Đóng barrier & ghi log
+         setTimeout(() => setStep('IDLE'), 2000);
+      }, 3000);
     }, 1500);
   };
 
   return (
-    <div id="kiosk-sim" className="h-full flex items-center justify-center bg-slate-900 p-8">
-      <Card id="kiosk-terminal" className="w-full max-w-lg aspect-video flex flex-col items-center justify-center p-12 bg-slate-800 border-slate-700 text-white relative overflow-hidden rounded-3xl">
-        {/* Animated Background Overlay */}
+    <div id="kiosk-sim" className="h-full flex flex-col items-center justify-center bg-slate-900 p-8 relative">
+      <Card id="kiosk-terminal" className="w-full max-w-lg aspect-video flex flex-col items-center justify-center p-12 bg-slate-800 border-slate-700 text-white relative overflow-hidden rounded-3xl z-10">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_50%_-20%,rgba(37,99,235,0.5),transparent)] pointer-events-none" />
 
         <AnimatePresence mode="wait">
           {step === 'IDLE' && (
-            <motion.div 
-              key="idle"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="text-center space-y-8"
-            >
+            <motion.div key="idle" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className="text-center space-y-8">
               <div className="space-y-1">
                 <h2 className="text-3xl font-black tracking-tighter uppercase italic text-blue-600">HCMUT Parking</h2>
                 <p className="text-slate-400 text-xs uppercase tracking-widest font-medium">Please select entry method</p>
               </div>
               <div className="flex gap-4">
-                <button 
-                  id="btn-member-tap"
-                  onClick={() => simulateTap(UserRole.STUDENT)}
-                  className="flex flex-col items-center gap-3 p-6 bg-brand hover:bg-blue-700 rounded-2xl transition-all group shadow-lg shadow-blue-900/40"
-                >
+                <button onClick={simulateMemberTap} className="flex flex-col items-center gap-3 p-6 bg-brand hover:bg-blue-700 rounded-2xl transition-all group shadow-lg shadow-blue-900/40 w-36">
                   <CreditCard className="w-10 h-10 group-hover:scale-110 transition-transform" />
-                  <span className="text-xs font-bold uppercase tracking-widest">Member ID</span>
+                  <span className="text-xs font-bold uppercase tracking-widest text-center">Tap Member ID</span>
                 </button>
-                <button 
-                  id="btn-visitor-ticket"
-                  onClick={() => setStep('VISITOR_PLATE')}
-                  className="flex flex-col items-center gap-3 p-6 bg-slate-700 hover:bg-slate-600 rounded-2xl transition-all group shadow-lg shadow-slate-900/40"
-                >
-                  <Car className="w-10 h-10 group-hover:scale-110 transition-transform" />
-                  <span className="text-xs font-bold uppercase tracking-widest">Visitor Ticket</span>
+                <button onClick={simulateVisitorRequest} className="flex flex-col items-center gap-3 p-6 bg-slate-700 hover:bg-slate-600 rounded-2xl transition-all group shadow-lg shadow-slate-900/40 w-36">
+                  <QrCode className="w-10 h-10 group-hover:scale-110 transition-transform" />
+                  <span className="text-xs font-bold uppercase tracking-widest text-center">Get Visitor Ticket</span>
                 </button>
               </div>
             </motion.div>
@@ -129,20 +193,38 @@ function GateKioskSimulator() {
           {step === 'VERIFYING' && (
             <motion.div key="verifying" className="flex flex-col items-center gap-6">
               <div className="w-16 h-16 border-4 border-brand border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm font-bold uppercase tracking-[0.2em] animate-pulse text-blue-400">Verifying ID...</p>
+              <p className="text-sm font-bold uppercase tracking-[0.2em] animate-pulse text-blue-400">Verifying Identity...</p>
             </motion.div>
           )}
 
-          {step === 'VISITOR_PLATE' && (
-            <motion.div key="plate" className="w-full space-y-6 text-center">
-              <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Plate Recognition</h3>
-              <div className="bg-white text-slate-800 p-4 rounded-xl font-mono text-4xl font-bold tracking-widest inline-block border-4 border-slate-700 shadow-2xl">
-                59A-123.45
+          {step === 'CHECKING_AVAILABILITY' && (
+            <motion.div key="checking" className="flex flex-col items-center gap-6">
+              <Database className="w-12 h-12 text-slate-400 animate-bounce" />
+              <p className="text-sm font-bold uppercase tracking-[0.2em] text-slate-400">Checking Zone Capacity...</p>
+            </motion.div>
+          )}
+
+          {step === 'DENIED' && (
+            <motion.div key="denied" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center gap-4 text-center">
+              <AlertTriangle className="w-16 h-16 text-red-500" />
+              <h2 className="text-2xl font-black uppercase tracking-tighter text-red-500">ACCESS DENIED</h2>
+              <p className="text-sm font-bold uppercase tracking-widest text-slate-300">{message}</p>
+            </motion.div>
+          )}
+
+          {step === 'DISPENSING_TICKET' && (
+            <motion.div key="dispensing" className="w-full space-y-6 text-center flex flex-col items-center">
+              <div className="relative w-32 h-16 bg-slate-900 rounded-lg border-2 border-slate-700 flex justify-center overflow-hidden">
+                 <motion.div 
+                    initial={{ y: -50 }} animate={{ y: 20 }} transition={{ duration: 1 }}
+                    className="w-16 h-24 bg-white text-slate-900 absolute top-0 flex flex-col items-center pt-2 shadow-lg cursor-pointer hover:bg-slate-200"
+                    onClick={handleTakeTicket}
+                 >
+                    <QrCode className="w-8 h-8" />
+                    <span className="text-[8px] font-black mt-1">TAKE ME</span>
+                 </motion.div>
               </div>
-              <div className="flex justify-center gap-3">
-                <button onClick={() => setStep('IDLE')} className="px-6 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-bold uppercase">Cancel</button>
-                <button onClick={() => simulateTap(UserRole.VISITOR)} className="px-6 py-2 rounded-lg bg-brand hover:bg-blue-600 text-xs font-bold uppercase shadow-lg shadow-blue-900/40">Confirm & Print</button>
-              </div>
+              <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400 animate-pulse">Please take your ticket</h3>
             </motion.div>
           )}
 
@@ -155,29 +237,45 @@ function GateKioskSimulator() {
                 <h2 className="text-3xl font-black italic tracking-tighter uppercase">Welcome!</h2>
                 <p className="text-sm text-slate-400 uppercase tracking-widest font-bold font-mono">{session?.role}</p>
               </div>
-              <p className="text-slate-500 font-mono text-xs">Entry: {session?.entryTime?.toLocaleTimeString()}</p>
             </motion.div>
           )}
 
           {step === 'BARRIER_OPEN' && (
             <motion.div key="barrier" className="text-center space-y-8">
                <motion.div 
-                animate={{ rotate: [-15, 0, -15] }}
-                transition={{ duration: 0.5, repeat: Infinity }}
+                animate={{ rotate: [-15, 0, -15] }} transition={{ duration: 0.5, repeat: Infinity }}
                 className="w-48 h-5 bg-yellow-500 mx-auto rounded-full origin-left -rotate-12 shadow-2xl" 
                />
                <h3 className="text-5xl font-black text-green-500 uppercase tracking-tighter italic">Barrier Open</h3>
-               <p className="text-xs text-slate-400 uppercase tracking-widest font-bold">Please proceed with caution</p>
+               <p className="text-xs text-slate-400 uppercase tracking-widest font-bold animate-pulse">Proceed vehicle through gate</p>
+            </motion.div>
+          )}
+
+          {step === 'FINALIZING' && (
+            <motion.div key="finalizing" className="flex flex-col items-center gap-6">
+              <div className="w-48 h-5 bg-yellow-500 mx-auto rounded-full origin-left shadow-2xl transition-all duration-1000" />
+              <p className="text-sm font-bold uppercase tracking-[0.2em] text-slate-400">Closing Barrier & Logging...</p>
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* Status Bar */}
-        <div className="absolute bottom-4 left-4 right-4 flex justify-between text-[10px] uppercase tracking-widest text-slate-500 font-mono italic">
-          <span>Node ID: GATE_E_01</span>
-          <span>Online / Standard Mode</span>
-        </div>
       </Card>
+
+      {/* --- DEBUG / SIMULATION PANEL --- */}
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-slate-800 p-4 rounded-xl border border-slate-700 flex gap-6 items-center shadow-2xl z-20">
+         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><Cpu className="w-3 h-3"/> Test Scenarios</span>
+         <label className="flex items-center gap-2 text-xs font-bold text-white cursor-pointer hover:text-brand transition-colors">
+            <input type="checkbox" checked={simConfig.isFull} onChange={e => setSimConfig(p => ({...p, isFull: e.target.checked}))} className="rounded border-slate-600 bg-slate-900" />
+            Parking Full (availSpaces=0)
+         </label>
+         <label className="flex items-center gap-2 text-xs font-bold text-white cursor-pointer hover:text-red-400 transition-colors">
+            <input type="checkbox" checked={simConfig.isInvalid} onChange={e => setSimConfig(p => ({...p, isInvalid: e.target.checked}))} className="rounded border-slate-600 bg-slate-900" />
+            Invalid ID Card
+         </label>
+         <label className="flex items-center gap-2 text-xs font-bold text-white cursor-pointer hover:text-red-400 transition-colors">
+            <input type="checkbox" checked={simConfig.isHwError} onChange={e => setSimConfig(p => ({...p, isHwError: e.target.checked}))} className="rounded border-slate-600 bg-slate-900" />
+            Ticket Jam Error
+         </label>
+      </div>
     </div>
   );
 }
@@ -853,56 +951,141 @@ function OperatorDashboard({ onLogout }: { onLogout: () => void }) {
 
 function AdminConsole() {
   const [policies, setPolicies] = useState(PRICING_POLICIES);
+  
+  // Các state mới thêm vào để quản lý trạng thái từ biểu đồ
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState('1 hour ago');
+  const [reportTimeframe, setReportTimeframe] = useState('7D');
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Giả lập tính năng Master Data Syncing
+  const handleTriggerSync = () => {
+    setIsSyncing(true);
+    setTimeout(() => {
+      setIsSyncing(false);
+      setLastSync('Just now');
+    }, 2500);
+  };
+
+  // Giả lập tính năng Export Report
+  const handleExportReport = () => {
+    setIsExporting(true);
+    setTimeout(() => {
+      setIsExporting(false);
+      alert(`Report for past ${reportTimeframe} exported successfully!`);
+    }, 1500);
+  };
 
   return (
-    <div id="admin-console" className="p-6 md:p-8 space-y-8 h-full bg-slate-50">
-       <header className="flex justify-between items-center">
+    <div id="admin-console" className="p-6 md:p-8 space-y-8 h-full bg-slate-50 overflow-auto">
+       <header className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
         <h1 className="text-2xl font-black tracking-tight flex items-center gap-3">
-          <div className="p-2 bg-slate-900 rounded-lg"><Settings className="w-6 h-6 text-white" /></div> Admin Configuration
+          <div className="p-2 bg-slate-900 rounded-lg"><Settings className="w-6 h-6 text-white" /></div> 
+          System Configuration
         </h1>
-        <button className="px-5 py-2 bg-hcmut-blue text-white rounded-lg font-bold shadow-lg shadow-hcmut-blue/20 hover:scale-105 active:scale-95 transition-transform">Deploy New Rules</button>
+        <div className="flex gap-3">
+          <button 
+            onClick={handleTriggerSync}
+            disabled={isSyncing}
+            className="px-5 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg font-bold shadow-sm hover:bg-slate-50 transition-colors flex items-center gap-2 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-brand' : ''}`} />
+            {isSyncing ? 'Syncing with HCMUT...' : 'Sync Master Data'}
+          </button>
+          <button className="px-5 py-2 bg-brand text-white rounded-lg font-bold shadow-lg shadow-blue-900/20 hover:scale-105 active:scale-95 transition-transform">
+            Deploy New Rules
+          </button>
+        </div>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <Card className="flex flex-col">
-          <div className="p-5 border-b border-slate-100">
-             <h3 className="font-bold text-lg">Pricing Policies</h3>
-             <p className="text-sm text-slate-500">Configure rates per role and zone</p>
-          </div>
-          <div className="p-5 space-y-4">
-            {policies.map(p => (
-              <div key={p.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between group hover:border-hcmut-blue hover:shadow-md transition-all">
-                <div className="flex items-center gap-4">
-                  <div className="p-2 bg-white rounded-lg border border-slate-200 group-hover:bg-hcmut-blue group-hover:text-white transition-colors">
-                     {p.role === UserRole.STUDENT ? <Smartphone className="w-5 h-5" /> : <UserIcon className="w-5 h-5" />}
-                  </div>
-                  <div>
-                    <p className="font-bold">{p.role}</p>
-                    <p className="text-xs text-slate-500">{p.ratePerHour.toLocaleString()} VND / hr</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-slate-700">{p.gracePeriodMinutes}m <span className="text-slate-400 font-normal">Grace</span></p>
-                  <button className="text-xs font-bold text-hcmut-blue opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-tight">Edit Policy</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
+      {/* Hiển thị trạng thái Sync gần nhất */}
+      <div className="text-xs font-bold text-slate-400 flex items-center gap-2">
+        <Database className="w-3 h-3" /> Master Data Status: <span className="text-green-600">Connected</span> • Last sync: {lastSync}
+      </div>
 
-        <Card className="flex flex-col">
-           <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        
+        {/* Cột trái: Quản lý Policy & Phân quyền (RBAC) */}
+        <div className="space-y-8">
+          {/* Box 1: Pricing Policies */}
+          <Card className="flex flex-col">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+               <div>
+                 <h3 className="font-bold text-lg">Pricing Policies</h3>
+                 <p className="text-sm text-slate-500">Configure rates per role and zone</p>
+               </div>
+            </div>
+            <div className="p-5 space-y-4">
+              {policies.map(p => (
+                <div key={p.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between group hover:border-brand hover:shadow-md transition-all">
+                  <div className="flex items-center gap-4">
+                    <div className="p-2 bg-white rounded-lg border border-slate-200 group-hover:bg-brand group-hover:text-white transition-colors">
+                       {p.role === UserRole.STUDENT ? <Smartphone className="w-5 h-5" /> : <UserIcon className="w-5 h-5" />}
+                    </div>
+                    <div>
+                      <p className="font-bold">{p.role}</p>
+                      <p className="text-xs text-slate-500">{p.ratePerHour.toLocaleString()} VND / hr</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-slate-700">{p.gracePeriodMinutes}m <span className="text-slate-400 font-normal">Grace</span></p>
+                    <button className="text-xs font-bold text-brand opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-tight">Edit Policy</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Box 2: Trạm quản lý RBAC (Mới) */}
+          <Card className="flex flex-col border-dashed border-2">
+            <div className="p-5 border-b border-slate-100">
+               <h3 className="font-bold text-lg flex items-center gap-2"><Users className="w-5 h-5" /> Role & Privileges</h3>
+               <p className="text-sm text-slate-500">Manage parking access levels</p>
+            </div>
+            <div className="p-5 flex justify-between items-center bg-slate-50/50">
+              <span className="text-sm font-medium text-slate-600">Active Operator Accounts: 12</span>
+              <button className="text-xs font-bold text-brand uppercase tracking-wider">Manage RBAC</button>
+            </div>
+          </Card>
+        </div>
+
+        {/* Cột phải: Log hệ thống & Báo cáo */}
+        <Card className="flex flex-col h-full min-h-[500px]">
+           <div className="p-5 border-b border-slate-100 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
               <div>
-                <h3 className="font-bold text-lg">System Integrity Audit</h3>
-                <p className="text-sm text-slate-500">Recent master configuration changes</p>
+                <h3 className="font-bold text-lg">System Audit & Reports</h3>
+                <p className="text-sm text-slate-500">Log trails and financial exports</p>
               </div>
-              <div className="p-2 bg-slate-100 rounded-lg text-slate-400 cursor-help"><ShieldCheck className="w-5 h-5" /></div>
+              
+              {/* Report Timeframe & Export Controls (Mới) */}
+              <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                <select 
+                  value={reportTimeframe}
+                  onChange={(e) => setReportTimeframe(e.target.value)}
+                  className="bg-transparent text-xs font-bold outline-none cursor-pointer pr-2"
+                >
+                  <option value="24H">Last 24h</option>
+                  <option value="7D">Last 7 Days</option>
+                  <option value="30D">Last 30 Days</option>
+                </select>
+                <div className="w-px h-4 bg-slate-300"></div>
+                <button 
+                  onClick={handleExportReport}
+                  disabled={isExporting}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white rounded text-xs font-bold hover:bg-slate-800 transition-colors disabled:opacity-50"
+                >
+                  {isExporting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                  Export
+                </button>
+              </div>
            </div>
-           <div className="p-5 space-y-6">
+           
+           <div className="p-5 space-y-6 flex-1 overflow-auto">
               {[
                 { actor: 'Admin (Dat)', action: 'Updated Pricing Policy v2.4', date: '2h ago', status: 'Published' },
                 { actor: 'Operator (Khanh)', action: 'Manual Barrier Override: Gate E_02', date: '5h ago', status: 'Audit Req' },
-                { actor: 'System', action: 'Auto-sync: 1,422 sessions to BKPay', date: '1d ago', status: 'Success' },
+                { actor: 'System HCMUT', action: 'Auto-sync: Master Data packet received', date: lastSync, status: 'Success' },
+                { actor: 'System', action: 'Exported Financial Report (7D)', date: '1d ago', status: 'Success' },
               ].map((log, i) => (
                 <div key={i} className="flex gap-4">
                    <div className="w-1 bg-slate-200 rounded-full" />
@@ -917,9 +1100,10 @@ function AdminConsole() {
                 </div>
               ))}
            </div>
-           <div className="mt-auto p-5 bg-slate-900 text-white rounded-b-xl border-t border-white/5 flex items-center gap-3">
-              <div className="p-2 bg-hcmut-gold rounded text-slate-900 group cursor-pointer hover:scale-105 transition-transform"><Search className="w-4 h-4" /></div>
-              <input type="text" placeholder="Search audit trail by actor ID or date range..." className="bg-transparent border-none outline-none text-sm w-full placeholder:text-slate-500 font-mono tracking-tighter" />
+           
+           <div className="mt-auto p-5 bg-slate-900 text-white rounded-b-2xl border-t border-white/5 flex items-center gap-3">
+              <div className="p-2 bg-slate-800 rounded text-brand group cursor-pointer hover:scale-105 transition-transform"><Search className="w-4 h-4" /></div>
+              <input type="text" placeholder="Search audit trail by actor ID or event..." className="bg-transparent border-none outline-none text-sm w-full placeholder:text-slate-500 font-mono tracking-tighter" />
            </div>
         </Card>
       </div>
